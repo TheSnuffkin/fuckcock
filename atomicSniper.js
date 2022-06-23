@@ -5,7 +5,7 @@ const { Webhook, MessageBuilder } = require("discord-webhook-node");
 module.exports = class Sniper {
   constructor(collection, tid, price, hook, delay) {
     this.collection = collection;
-    this.tid = parseInt(tid);
+    this.tid = tid;
     this.price = parseInt(price);
     this.response;
     this.hook = hook;
@@ -23,6 +23,7 @@ module.exports = class Sniper {
       },
     };
   }
+
   async getResults() {
     this.response = await axios.get(
       `http://wax.api.atomicassets.io/atomicmarket/v2/sales?state=1collection_name=${this.collection}&template_id=${this.tid}&page=1&limit=100&order=desc&sort=created`
@@ -39,8 +40,50 @@ module.exports = class Sniper {
           currentPrice
         );
         console.log("SUCCESS", currentPrice, this.result[sale].sale_id);
+        return true;
+      }
+      return false;
+    }
+  }
+
+  async monitorCollection() {
+    this.response = await axios.get(
+      `https://wax.api.atomicassets.io/atomicmarket/v2/sales?state=1&collection_name=${this.collection}&page=1&limit=100&order=desc&sort=created`
+    );
+    this.result = this.response.data.data;
+    let currentPrice;
+    for (let sale in this.result) {
+      console.log(this.result[sale].assets[0]);
+      console.log(this.result[sale].sale_id);
+      console.log(
+        this.result[sale].assets[0].prices[0].min +
+          " " +
+          this.result[sale].assets[0].template.template_id
+      );
+      currentPrice = parseFloat(this.result[sale].price.amount);
+      this.suggested = parseFloat(
+        this.result[sale].assets[0].prices[0].suggested_median
+      );
+      console.log("price: " + currentPrice + " median: " + this.suggested);
+      console.log(
+        "sale: " +
+          this.result[sale].sale_id +
+          " tid: " +
+          this.result[sale].assets[0].template.template_id
+      );
+      if (currentPrice <= this.suggested - this.suggested * 0.02) {
+        this.sendHooks(
+          this.collection,
+          this.result[sale].sale_id,
+          this.result[sale].assets[0].template.template_id,
+          currentPrice
+        );
+        console.log("SUCCESS", currentPrice, this.result[sale].sale_id);
+        return true;
       }
     }
+    console.log("price not good enough");
+    return false;
   }
 
   async sendHooks(collection, sale_id, tid, price) {
@@ -75,14 +118,20 @@ module.exports = class Sniper {
       },
     };
     console.log("task started");
-    this.response = await axios.get(
-      `https://wax.api.atomicassets.io/atomicmarket/v1/prices/templates?collection_name=${this.collection}&template_id=${this.tid}&page=1&limit=100&order=desc`,
-      config
-    );
-    this.result = this.response.data.data[0];
-    this.suggested = parseFloat(this.result.suggested_median);
-    console.log(this.suggested);
-    console.log("price: ", this.suggested - this.suggested * 0.2);
+    console.log(this.tid);
+    if (this.tid == "none") {
+      while (true) {
+        if (this.canceled) {
+          return false;
+        }
+        while (!(await this.monitorCollection())) {
+          await delay(this.delay || 1000);
+          if (this.canceled) {
+            return false;
+          }
+        }
+      }
+    }
     while (true) {
       if (this.canceled) {
         return false;
